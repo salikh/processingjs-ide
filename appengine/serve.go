@@ -73,6 +73,7 @@ func main() {
 	r.Methods("GET").Path("/list").Handler(appHandler(listHandler))
 	r.Methods("GET").Path("/recent").Handler(appHandler(recentHandler))
 	r.Methods("GET").Path("/sketch/{id}").Handler(appHandler(sketchGetHandler))
+	r.Methods("GET").Path("/demo/{id}").Handler(appHandler(sketchDemoHandler))
 	r.Methods("POST").Path("/sketch").Handler(appHandler(sketchPostHandler))
 	r.Methods("POST").Path("/sketch/{id}").Handler(appHandler(sketchPostHandler))
 	r.Methods("POST").Path("/tts").Handler(appHandler(ttsPostHandler))
@@ -99,11 +100,34 @@ var sketchListHTML = `
 <p><a href='/static/ide-ja.html'>Create new</a></p>
 {{range .}}
 <a href='/static/ide-ja.html#sketch={{.ID}}'>{{if .Title}}{{.Title}}{{else}}sketch{{end}}</a>
+<small>(<a href='/static/ide-ja.html#load={{.ID}}'>fork</a>,<a href='/demo/{{.ID}}'>demo</a>)</small>
 {{else}}
 0 sketches
 {{end}}
 `
 var sketchListTmpl = template.Must(template.New("sketchList").Parse(sketchListHTML))
+
+var sketchDemoHTML = `
+<!DOCTYPE html>
+<head>
+	<title>{{.Title}}</title>
+	<link rel="stylesheet" type="text/css" href="http://processing.salikh.info/static/inner.css">
+	<script src="http://processing.salikh.info/static/processing.js"></script>
+	<script type="application/processing" data-processing-target="pjs">{{.Source | html}}</script>
+	<style type="text/css">@font-face {
+  font-family: "PjsEmptyFont";
+  src: url('data:application/x-font-ttf;base64,AAEAAAAKAIAAAwAgT1MvMgAAAAAAAAEoAAAAVmNtYXAAAAAAAAABiAAAACxnbHlmAAAAAAAAAbwAAAAkaGVhZAAAAAAAAACsAAAAOGhoZWEAAAAAAAAA5AAAACRobXR4AAAAAAAAAYAAAAAGbG9jYQAAAAAAAAG0AAAABm1heHAAAAAAAAABCAAAACBuYW1lAAAAAAAAAeAAAAAgcG9zdAAAAAAAAAIAAAAAEAABAAAAAQAAAkgTY18PPPUACwAgAAAAALSRooAAAAAAyld0xgAAAAAAAQABAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAEAAAACAAIAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACMAIwAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAMAAQAAAAwABAAgAAAABAAEAAEAAABB//8AAABB////wAABAAAAAAAAAAgAEgAAAAEAAAAAAAAAAAAAAAAxAAABAAAAAAABAAEAAQAAMTcBAQAAAAAAAgAeAAMAAQQJAAEAAAAAAAMAAQQJAAIAAgAAAAAAAQAAAAAAAAAAAAAAAAAA')
+       format('truetype');
+}</style>
+</head>
+<body>
+<h3>{{.Title}}</h3>
+<canvas id="pjs" tabindex="0" width="100" height="100" style="image-rendering: -webkit-optimize-contrast !important;"></canvas>
+<span style="position: absolute; left: 0px; opacity: 0; font-family: PjsEmptyFont, fantasy; display: none;">AAAAAAAA</span>
+</body>
+</html>`
+
+var sketchDemoTmpl = template.Must(template.New("sketchDemo").Parse(sketchDemoHTML))
 
 // listHandler retrieves the list of sketches and shows the links.
 func listHandler(w http.ResponseWriter, req *http.Request) error {
@@ -255,6 +279,36 @@ func sketchGetHandler(w http.ResponseWriter, req *http.Request) error {
 	if _, err := w.Write(sketch.Source); err != nil {
 		return err
 	}
+	return nil
+}
+
+func sketchDemoHandler(w http.ResponseWriter, req *http.Request) error {
+	ctx := appengine.NewContext(req)
+	if dataStore == nil {
+		var err error
+		dataStore, err = newDatastore(ctx)
+		if err != nil {
+			return fmt.Errorf("could not connect to DataStore: %s", err)
+		}
+	}
+	vars := mux.Vars(req)
+	idstr := vars["id"]
+	if idstr == "" {
+		return fmt.Errorf("invalid empty sketch id")
+	}
+	id, err := db.ParseID(idstr)
+	if err != nil {
+		return fmt.Errorf("error parsing sketch id %q: %s", idstr, err)
+	}
+	sketch, err := dataStore.GetSketch(ctx, id)
+	if err != nil {
+		return fmt.Errorf("Sketch %d does not exist: %s", id, err)
+	}
+	w.Header()["Content-Type"] = []string{"text/html; charset=utf-8"}
+	if sketch.Title == "" {
+		sketch.Title = "sketch"
+	}
+	sketchDemoTmpl.Execute(w, sketch)
 	return nil
 }
 
